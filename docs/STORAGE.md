@@ -1,15 +1,14 @@
-# Storage and backup (copy this file to STORAGE.md and fill it in)
+# Storage and backup
 
 ## Where things live
-- Code: GitHub (<your-username>/datascience_env_monit),
-  my laptop, cluster HOME
-- Results: cluster workspace `envmon`, path: <from ws_list>
+- Code: GitHub (cherie177/datascience_env_monit), my laptop, cluster HOME
+- Results: cluster workspace `envmon`, path: /pfs/work9/workspace/scratch/fr_cl424-envmon
 
 ## Expiry
-- Workspace `envmon` expires on: <date from ws_list>
-- I extend it on: <date>. Calendar reminder set: yes/no
+- Workspace `envmon` expires on: 2027-01-10 (Sun Jan 10 17:11:14 2027)
+- I extend it on: 2027-01-05. Calendar reminder set: yes
 
 ## Backup
 - Code: GitHub is the second copy
-- Results I must keep: copied to my laptop on <date>
-- Raw data: original download source + <university storage>
+- Results I must keep: copied to my laptop on 2026-11-11
+- Raw data: original download source
