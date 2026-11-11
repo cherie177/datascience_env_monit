@@ -1,0 +1,20 @@
+Loading module dependency 'compiler/gnu/11.4'.
+Host: uc3n069.localdomain 
+Job ID: 8540416 
+Resamples: 200 
+Mean daily GPP: 3.98 (95% CI 3.81 to 4.14)
+
+============================= JOB FEEDBACK =============================
+
+NodeName=uc3n069
+Job ID: 8540416
+Cluster: uc3
+User/Group: fr_cl424/fr_fr
+State: COMPLETED (exit code 0)
+Nodes: 1
+Cores per node: 2
+CPU Utilized: 00:00:00
+CPU Efficiency: 0.00% of 00:00:34 core-walltime
+Job Wall-clock time: 00:00:17
+Memory Utilized: 34.69 MB
+Memory Efficiency: 0.87% of 3.91 GB (1.95 GB/core)
