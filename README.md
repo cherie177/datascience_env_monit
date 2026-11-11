@@ -4,8 +4,7 @@ Course material for the Master's course *Environmental Monitoring and Data Analy
 (1st semester, environmental science), Chair of Sensor-based Geoinformatics,
 University of Freiburg. Lab website: <https://uni-freiburg.de/enr-geosense>
 
-The course runs weekly on Fridays. In each block there is about two hours of teaching and
-about two hours of assignment work. Everything you need for the assignments is in this repository.
+Name **Chaeyeon Lee**
 
 ## Assignments
 
