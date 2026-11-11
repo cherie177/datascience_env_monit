@@ -5,6 +5,7 @@ Course material for the Master's course *Environmental Monitoring and Data Analy
 University of Freiburg. Lab website: <https://uni-freiburg.de/enr-geosense>
 
 Name **Chaeyeon Lee**
+Date **26/11/11**
 
 ## Assignments
 
