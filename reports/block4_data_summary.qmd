@@ -1,0 +1,361 @@
+---
+title: "Data summary of my five flux towers"
+author: "Chaeyeon Lee"
+date: today
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  warning: false
+  echo: false
+---
+
+```{python}
+import sys
+import zipfile
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from IPython.display import display, Markdown
+
+ROOT = Path(".").resolve()
+if not (ROOT / "scripts").exists():
+    ROOT = ROOT.parent
+sys.path.insert(0, str(ROOT))
+
+from scripts.b3_read_all_hh import read_hh
+
+zip_files = sorted((ROOT / "data/raw").glob("*.zip"))
+hh = pd.concat([read_hh(zf) for zf in zip_files], ignore_index=True)
+hh["year"] = hh["time"].dt.year
+hh["hour"] = hh["time"].dt.hour + hh["time"].dt.minute / 60.0
+hh["date"] = hh["time"].dt.floor("D")
+
+snap_files = sorted((ROOT / "data/snapshots").glob("*.csv"))
+snap = pd.concat([pd.read_csv(f) for f in snap_files], ignore_index=True)
+
+my_sites = sorted(hh["site"].unique())
+site_col = [c for c in snap.columns if "SITE" in c.upper() and "ID" in c.upper()][0]
+meta = snap[snap[site_col].isin(my_sites)].drop_duplicates(subset=[site_col]).copy()
+meta = meta.rename(columns={site_col: "site"}).sort_values("site").reset_index(drop=True)
+
+def find_col(df, keywords):
+    for kw in keywords:
+        matches = [c for c in df.columns if kw.lower() in c.lower()]
+        if matches:
+            return matches[0]
+    return None
+
+col_name = find_col(meta, ["SITE_NAME", "NAME"])
+col_country = find_col(meta, ["COUNTRY"])
+col_igbp = find_col(meta, ["IGBP"])
+col_lat = find_col(meta, ["LAT"])
+col_lon = find_col(meta, ["LON"])
+col_hub = find_col(meta, ["HUB", "NETWORK", "SOURCE"])
+col_cit = find_col(meta, ["CITATION", "DOI", "REFERENCE"])
+
+hub_map = {zf.name.split("_")[1]: zf.name.split("_")[0] for zf in zip_files}
+yr_bounds = hh.groupby("site")["year"].agg(first_yr="min", last_yr="max").reset_index()
+meta = meta.merge(yr_bounds, on="site", how="left")
+```
+
+## C1. Site overview
+
+All half-hourly FLUXNET timestamps are in **local standard time** (no daylight-saving shifts), stored in a timezone-naive container.
+
+```{python}
+overview_rows = []
+for _, r in meta.iterrows():
+    overview_rows.append({
+        "Site ID": r["site"],
+        "Name": r[col_name] if col_name else "",
+        "Country": r[col_country] if col_country else r["site"].split("-")[0],
+        "IGBP class": r[col_igbp] if col_igbp else "",
+        "Latitude (°)": round(float(r[col_lat]), 4) if col_lat else np.nan,
+        "Longitude (°)": round(float(r[col_lon]), 4) if col_lon else np.nan,
+        "First year": int(r["first_yr"]),
+        "Last year": int(r["last_yr"]),
+        "Hub": r[col_hub] if col_hub else hub_map.get(r["site"], ""),
+        "Data citation": r[col_cit] if col_cit else "See Data and citation section"
+    })
+overview_df = pd.DataFrame(overview_rows)
+overview_df.style.hide(axis="index")
+```
+
+```{python}
+#| fig-cap: "Geographic distribution of the five selected FLUXNET towers."
+fig, ax = plt.subplots(figsize=(9, 4.5))
+ax.set_xlim(-180, 180)
+ax.set_ylim(-65, 80)
+ax.axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+ax.grid(True, linestyle=":", alpha=0.5)
+ax.set_facecolor("#f4f7fa")
+ax.set_xlabel("Longitude (°)")
+ax.set_ylabel("Latitude (°)")
+
+lats = overview_df["Latitude (°)"].astype(float)
+lons = overview_df["Longitude (°)"].astype(float)
+ax.scatter(lons, lats, color="#d95f02", edgecolor="black", s=80, zorder=5)
+
+for _, row in overview_df.iterrows():
+    ax.annotate(
+        f"{row['Site ID']} ({row['IGBP class']})",
+        (float(row["Longitude (°)"]), float(row["Latitude (°)"])),
+        xytext=(6, 5), textcoords="offset points", fontsize=9, fontweight="bold"
+    )
+
+ax.set_title("Locations of the Five Flux Towers")
+plt.tight_layout()
+plt.show()
+```
+
+## C2. Data coverage
+
+```{python}
+#| fig-cap: "Annual share of half-hourly intervals with directly measured NEE (NEE_VUT_REF_QC == 0)."
+cov = (
+    hh.assign(measured=(hh["NEE_VUT_REF_QC"] == 0).astype(float))
+    .groupby(["site", "year"])["measured"]
+    .mean()
+    .unstack("year")
+    .reindex(my_sites)
+)
+
+fig, ax = plt.subplots(figsize=(11, 3.4))
+im = ax.imshow(cov.values, aspect="auto", cmap="YlGnBu", vmin=0, vmax=1)
+ax.set_yticks(range(len(cov.index)))
+ax.set_yticklabels(cov.index)
+ax.set_xticks(range(len(cov.columns)))
+ax.set_xticklabels(cov.columns, rotation=45, ha="right")
+
+for i in range(cov.shape[0]):
+    for j in range(cov.shape[1]):
+        val = cov.iloc[i, j]
+        if not np.isnan(val):
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=7.5,
+                    color="white" if val > 0.6 else "black")
+
+cbar = plt.colorbar(im, ax=ax, pad=0.02)
+cbar.set_label("Share of measured NEE (QC == 0)")
+ax.set_title("Fraction of Measured Half-Hourly NEE by Site and Year")
+plt.tight_layout()
+plt.show()
+
+best_site_mean = cov.mean(axis=1).idxmax()
+best_site_val = cov.mean(axis=1).max()
+best_pair = cov.stack().idxmax()
+best_pair_val = cov.stack().max()
+```
+
+**Coverage takeaway:** **`{python} best_site_mean`** achieves the highest overall average share of directly measured half-hourly NEE across its record (`{python} f"{best_site_val:.1%}"`), with the single highest annual coverage occurring at **`{python} best_pair[0]`** in **`{python} best_pair[1]`** (`{python} f"{best_pair_val:.1%}"`).
+
+## C3. Summary statistics
+
+For precipitation (`P_F`), the **Mean / Annual Sum** column reports the **mean annual precipitation sum (mm yr⁻¹)** rather than the half-hourly mean.
+
+```{python}
+var_specs = [
+    ("TA_F", "TA_F (°C)"),
+    ("SW_IN_F", "SW_IN_F (W m⁻²)"),
+    ("VPD_F", "VPD_F (hPa)"),
+    ("P_F", "P_F (mm; mean = mm yr⁻¹)"),
+    ("NEE_VUT_REF", "NEE_VUT_REF (µmol CO₂ m⁻² s⁻¹)"),
+    ("GPP_NT_VUT_REF", "GPP_NT_VUT_REF (µmol CO₂ m⁻² s⁻¹)"),
+    ("RECO_NT_VUT_REF", "RECO_NT_VUT_REF (µmol CO₂ m⁻² s⁻¹)"),
+    ("H_F_MDS", "H_F_MDS (W m⁻²)"),
+    ("LE_F_MDS", "LE_F_MDS (W m⁻²)")
+]
+
+for site in my_sites:
+    sub = hh[hh["site"] == site]
+    rows = []
+    for col, label in var_specs:
+        if col not in sub.columns or sub[col].isna().all():
+            rows.append({"Variable (unit)": label, "Mean / Annual Sum": np.nan, "Min": np.nan, "Max": np.nan, "% Missing": 100.0})
+            continue
+        pct_miss = sub[col].isna().mean() * 100.0
+        mean_val = sub.groupby("year")["P_F"].sum().mean() if col == "P_F" else sub[col].mean()
+        rows.append({
+            "Variable (unit)": label,
+            "Mean / Annual Sum": round(float(mean_val), 2),
+            "Min": round(float(sub[col].min()), 2),
+            "Max": round(float(sub[col].max()), 2),
+            "% Missing": round(float(pct_miss), 2)
+        })
+    display(Markdown(f"### Site `{site}`"))
+    display(pd.DataFrame(rows).style.hide(axis="index").format(precision=2, na_rep="—"))
+```
+
+## C4. Time series
+
+Half-hourly carbon fluxes ($\mu\text{mol CO}_2\text{ m}^{-2}\text{ s}^{-1}$) are aggregated to daily means and multiplied by $1.0378$ ($86\,400\text{ s d}^{-1} \times 12.011\text{ g C mol}^{-1} \times 10^{-6}$) to convert to $\text{g C m}^{-2}\text{ d}^{-1}$.
+
+```{python}
+daily = (
+    hh.groupby(["site", "date"], as_index=False)[["NEE_VUT_REF", "GPP_NT_VUT_REF", "RECO_NT_VUT_REF"]]
+    .mean()
+)
+for col in ["NEE_VUT_REF", "GPP_NT_VUT_REF", "RECO_NT_VUT_REF"]:
+    daily[col + "_gC"] = daily[col] * 1.0378
+
+check_zf = zip_files[0]
+check_site = check_zf.name.split("_")[1]
+with zipfile.ZipFile(check_zf) as z:
+    dd_matches = [n for n in z.namelist() if "FLUXMET_DD" in n]
+    if dd_matches:
+        with z.open(dd_matches[0]) as f:
+            dd_ref = pd.read_csv(f, na_values=[-9999], usecols=["TIMESTAMP", "NEE_VUT_REF"], dtype={"TIMESTAMP": str})
+        dd_ref["date"] = pd.to_datetime(dd_ref["TIMESTAMP"], format="%Y%m%d")
+        dd_ref["NEE_DD_gC"] = dd_ref["NEE_VUT_REF"] * 1.0378
+        comp = daily[daily["site"] == check_site][["date", "NEE_VUT_REF_gC"]].merge(dd_ref[["date", "NEE_DD_gC"]], on="date")
+        max_diff = (comp["NEE_VUT_REF_gC"] - comp["NEE_DD_gC"]).abs().max()
+    else:
+        max_diff = np.nan
+```
+
+**Aggregation check (`{python} check_site`):** Comparing our daily aggregated NEE against the official `FLUXMET_DD` daily product gives a maximum absolute difference of **`{python} f"{max_diff:.5f}"` $\text{g C m}^{-2}\text{ d}^{-1}$**.
+
+```{python}
+#| fig-cap: "Daily NEE, GPP, and RECO (g C m⁻² d⁻¹) over the full record for each site."
+fig, axes = plt.subplots(len(my_sites), 1, figsize=(11, 2.7 * len(my_sites)), sharex=False)
+
+for ax, site in zip(axes, my_sites):
+    sub = daily[daily["site"] == site].sort_values("date")
+    ax.plot(sub["date"], sub["GPP_NT_VUT_REF_gC"], color="#1b9e77", linewidth=0.6, alpha=0.85, label="GPP")
+    ax.plot(sub["date"], sub["RECO_NT_VUT_REF_gC"], color="#d95f02", linewidth=0.6, alpha=0.85, label="RECO")
+    ax.plot(sub["date"], sub["NEE_VUT_REF_gC"], color="#1f78b4", linewidth=0.6, alpha=0.9, label="NEE")
+    ax.axhline(0, color="black", linewidth=0.6, linestyle="--", alpha=0.5)
+    ax.set_ylabel("g C m⁻² d⁻¹")
+    ax.set_title(f"{site}", loc="left", fontweight="bold", fontsize=10)
+    ax.grid(True, linestyle=":", alpha=0.5)
+
+axes[0].legend(loc="upper right", ncol=3, frameon=True)
+axes[-1].set_xlabel("Date")
+plt.tight_layout()
+plt.show()
+```
+
+## C5. Diurnal cycles
+
+**Season definition (hemisphere-aware):** Meteorological seasons are assigned from calendar month and inverted for Southern Hemisphere towers ($\text{latitude} < 0$, i.e., `AU-Rob`):
+
+* **Northern Hemisphere ($\text{lat} \ge 0$):** DJF = Winter, MAM = Spring, JJA = Summer, SON = Autumn.
+* **Southern Hemisphere ($\text{lat} < 0$):** DJF = Summer, MAM = Autumn, JJA = Winter, SON = Spring.
+
+```{python}
+#| fig-cap: "Mean diurnal courses of NEE (top) and LE (bottom) by season across all five sites."
+lat_map = dict(zip(overview_df["Site ID"], overview_df["Latitude (°)"].astype(float)))
+nh_seasons = {12: "Winter", 1: "Winter", 2: "Winter", 3: "Spring", 4: "Spring", 5: "Spring",
+              6: "Summer", 7: "Summer", 8: "Summer", 9: "Autumn", 10: "Autumn", 11: "Autumn"}
+sh_seasons = {12: "Summer", 1: "Summer", 2: "Summer", 3: "Autumn", 4: "Autumn", 5: "Autumn",
+              6: "Winter", 7: "Winter", 8: "Winter", 9: "Spring", 10: "Spring", 11: "Spring"}
+
+month = hh["time"].dt.month
+hh["season"] = np.where(hh["site"].map(lat_map) < 0, month.map(sh_seasons), month.map(nh_seasons))
+
+season_order = ["Spring", "Summer", "Autumn", "Winter"]
+diurnal = hh.groupby(["site", "season", "hour"], as_index=False)[["NEE_VUT_REF", "LE_F_MDS"]].mean()
+
+fig, axes = plt.subplots(2, 4, figsize=(13, 6.2), sharex=True, sharey="row")
+colors = plt.cm.tab10.colors
+
+for col_idx, season in enumerate(season_order):
+    ax_nee, ax_le = axes[0, col_idx], axes[1, col_idx]
+    for s_idx, site in enumerate(my_sites):
+        sub = diurnal[(diurnal["site"] == site) & (diurnal["season"] == season)].sort_values("hour")
+        ax_nee.plot(sub["hour"], sub["NEE_VUT_REF"], label=site, color=colors[s_idx], linewidth=1.5)
+        ax_le.plot(sub["hour"], sub["LE_F_MDS"], label=site, color=colors[s_idx], linewidth=1.5)
+    ax_nee.axhline(0, color="black", linestyle="--", linewidth=0.7, alpha=0.5)
+    ax_nee.set_title(season, fontweight="bold")
+    ax_nee.grid(True, linestyle=":", alpha=0.5)
+    ax_le.grid(True, linestyle=":", alpha=0.5)
+    ax_le.set_xticks([0, 6, 12, 18, 24])
+    ax_le.set_xlabel("Hour of day (local standard time)")
+
+axes[0, 0].set_ylabel("NEE (µmol CO₂ m⁻² s⁻¹)")
+axes[1, 0].set_ylabel("LE (W m⁻²)")
+axes[0, -1].legend(loc="upper right", fontsize=8, frameon=True)
+plt.tight_layout()
+plt.show()
+```
+
+## C6. Your reading
+
+### 1. Surface energy balance closure
+
+```{python}
+#| fig-cap: "Turbulent heat fluxes (H + LE) vs. available energy (NETRAD − G) for measured half hours (QC == 0)."
+for site in my_sites:
+    sub = hh[hh["site"] == site]
+    valid = sub[(sub["H_F_MDS_QC"] == 0) & (sub["LE_F_MDS_QC"] == 0)].dropna(subset=["NETRAD", "G_F_MDS", "H_F_MDS", "LE_F_MDS"])
+    if len(valid) > 1000:
+        eb_site = site
+        eb_df = valid.copy()
+        break
+
+eb_df["avail_energy"] = eb_df["NETRAD"] - eb_df["G_F_MDS"]
+eb_df["turb_flux"] = eb_df["H_F_MDS"] + eb_df["LE_F_MDS"]
+slope, intercept = np.polyfit(eb_df["avail_energy"], eb_df["turb_flux"], 1)
+r_val = eb_df["avail_energy"].corr(eb_df["turb_flux"])
+
+fig, ax = plt.subplots(figsize=(6, 5.5))
+ax.scatter(eb_df["avail_energy"], eb_df["turb_flux"], s=3, alpha=0.15, color="#2b5c8f", rasterized=True)
+lims = [min(eb_df["avail_energy"].min(), eb_df["turb_flux"].min()), max(eb_df["avail_energy"].max(), eb_df["turb_flux"].max())]
+ax.plot(lims, lims, "k--", linewidth=1.2, label="1:1 line")
+x_vals = np.array(lims)
+ax.plot(x_vals, slope * x_vals + intercept, color="#d95f02", linewidth=1.8,
+        label=f"Linear fit: y = {slope:.2f}x + {intercept:.1f} (R² = {r_val**2:.2f})")
+ax.set_xlim(lims)
+ax.set_ylim(lims)
+ax.set_xlabel("Available energy: NETRAD − G (W m⁻²)")
+ax.set_ylabel("Turbulent fluxes: H + LE (W m⁻²)")
+ax.set_title(f"Energy Balance Closure at {eb_site} (n = {len(eb_df):,})")
+ax.legend(loc="upper left", frameon=True)
+ax.grid(True, linestyle=":", alpha=0.5)
+plt.tight_layout()
+plt.show()
+```
+
+### 2. Cross-site comparison
+
+```{python}
+annual_c = daily.assign(year=daily["date"].dt.year).groupby(["site", "year"])["NEE_VUT_REF_gC"].sum().groupby("site").mean()
+seasonal_amp = daily.assign(month=daily["date"].dt.month).groupby(["site", "month"])["NEE_VUT_REF_gC"].mean().groupby("site").agg(lambda s: s.max() - s.min())
+gap_share = (hh["NEE_VUT_REF_QC"] != 0).mean() * 100
+```
+
+Across the five towers, **`{python} annual_c.idxmin()`** takes up the most carbon per year on average (mean annual NEE of **`{python} f"{annual_c.min():.0f}"` $\text{g C m}^{-2}\text{ yr}^{-1}$**, where negative values represent net ecosystem carbon uptake), whereas semi-arid/grassland sites like `US-SRG` remain much closer to carbon neutrality (`{python} f"{annual_c.get('US-SRG', annual_c.max()):.0f}"` $\text{g C m}^{-2}\text{ yr}^{-1}$). **`{python} seasonal_amp.idxmax()`** exhibits the largest seasonal cycle in monthly mean NEE (`{python} f"{seasonal_amp.max():.2f}"` $\text{g C m}^{-2}\text{ d}^{-1}$ between peak summer uptake and winter respiration), driven by strong temperate seasonality in radiation and temperature. By contrast, the tropical rainforest tower **`AU-Rob`** sustains strong midday carbon uptake and latent heat flux year-round while showing inverted Southern Hemisphere seasonality (peak uptake in DJF/MAM rather than JJA). What surprised me most was the persistent surface energy balance closure deficit at `{python} eb_site` (linear fit slope of `{python} f"{slope:.2f}"` instead of $1.00$), reflecting unmeasured canopy heat storage and large-scale boundary-layer eddies typical of eddy covariance measurements. Finally, across the full multi-tower record, **`{python} f"{gap_share:.1f}%"`** of half-hourly NEE observations are gap-filled (`NEE_VUT_REF_QC != 0`), highlighting why filtering by quality control flags is critical when analyzing diurnal or energy-balance dynamics.
+
+## Data and citation
+
+### Site citations
+```{python}
+cit_file = ROOT / "data/raw/CITATIONS.txt"
+if cit_file.exists():
+    display(Markdown("```text\n" + cit_file.read_text().strip() + "\n```"))
+else:
+    for _, r in overview_df.iterrows():
+        display(Markdown(f"* **{r['Site ID']}** ({r['Name']}): {r['Data citation']}"))
+```
+
+### Network dataset & FLUXNET acknowledgement
+* **Dataset reference:** Pastorello, G., Trotta, C., Canfora, E. *et al.* (2020). The FLUXNET2015 dataset and the ONEFlux processing pipeline for eddy covariance data. *Scientific Data*, 7, 225. <https://doi.org/10.1038/s41597-020-0534-3>
+* **FLUXNET acknowledgement:**
+```{python}
+readme_candidates = [ROOT / "flux4student/README.md", ROOT / "README.md"]
+ack_text = None
+for cand in readme_candidates:
+    if cand.exists():
+        txt = cand.read_text()
+        if "FLUXNET" in txt:
+            lines = [ln for ln in txt.splitlines() if "FLUXNET" in ln or "acknowledg" in ln.lower() or "AmeriFlux" in ln or "ICOS" in ln]
+            if lines:
+                ack_text = "\n".join(lines)
+                break
+if ack_text:
+    display(Markdown("> " + ack_text.replace("\n", "\n> ")))
+else:
+    display(Markdown("> This work used eddy covariance data acquired and shared by the FLUXNET community, including these networks: AmeriFlux, AsiaFlux, European Fluxes Database Cluster, ICOS, and OzFlux. We acknowledge the financial support to the eddy covariance data harmonization provided by CarboEuropeIP, FAO-GTOS-TCO, iLEAPS, Max Planck Institute for Biogeochemistry, National Science Foundation, University of Tuscia, Université Laval and Environment Canada and US Department of Energy Office of Science."))
+```
