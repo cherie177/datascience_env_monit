@@ -7,7 +7,7 @@
 # Run all scripts from your project folder (the one with data/ and scripts/).
 
 # ---- Your settings ------------------------------------------------------------
-my_student <- "07"     # your student number from tower_sets_block4.csv
+my_student <- "14"     # your student number from tower_sets_block4.csv
 my_sites   <- NULL     # or pick sites yourself, e.g. c("DE-Hai", "FR-Hes")
 tower_csv  <- "tower_sets_block4.csv"   # from ILIAS (folder DATA), same file as Block 4
 

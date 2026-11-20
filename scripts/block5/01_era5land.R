@@ -15,7 +15,7 @@
 #      scroll to "Terms of use" and click Accept.
 #   3. Copy your Personal Access Token from your CDS profile page and run in R:
 #        install.packages("ecmwfr")
-#        ecmwfr::wf_set_key(key = "PASTE-YOUR-TOKEN-HERE")
+#        ecmwfr::wf_set_key(key = "1bd172d4-fece-4627-b19f-8e93d476e14e")
 #
 # Output: data/external/era5land/<SITE>_era5land_hourly.csv and <SITE>_era5land_daily.csv
 # Cite:   Muñoz-Sabater, J. et al. (2021) ERA5-Land. ESSD 13, 4349–4383.

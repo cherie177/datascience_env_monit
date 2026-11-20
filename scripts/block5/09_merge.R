@@ -58,8 +58,18 @@ daily <- flux
 
 era <- bind_rows(lapply(list.files(ext("era5land"), "_era5land_daily\\.csv$", full.names = TRUE),
                         read_csv, show_col_types = FALSE))
-if (nrow(era) > 0) daily <- left_join(daily, rename_with(era, ~ paste0("era5l_", .x), -c(site_id, date)),
-                                      by = c("site_id", "date"))
+# Rename ERA5‑Land variables by prefixing "era5l_" while preserving the join keys.
+if (nrow(era) > 0) {
+  daily <- left_join(
+    daily,
+      rename_with(
+        era,
+        function(x) paste0("era5l_", x),
+        -c(site_id, date)
+      ),
+    by = c("site_id", "date")
+  )
+}
 
 vi <- read_if(ext("modis", "modis_vi_my_sites.csv"))
 if (!is.null(vi)) {

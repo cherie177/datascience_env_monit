@@ -1,0 +1,214 @@
+---
+title: "Block 5: Complementary Data and Climate Normals for Five Flux Towers"
+subtitle: "Environmental Monitoring and Data Analysis · WS 2026/27 · Student 14"
+author: "Chaeyeon Lee"
+date: "2026-11-20"
+format:
+  html:
+    toc: true
+    code-fold: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(knitr)
+```
+
+## 1. Research Question and Additional Datasets Used
+
+**Research question:** How do each tower year's mean air temperature (`TA_F`, °C) and annual precipitation (`P_F`, mm) across my five eddy covariance flux towers (`AU-Rob`, `DE-Obe`, `US-SRG`, `KR-CmF`, `ES-LM2`) compare against long-term WorldClim 2.1 climate normals (`BIO1`, °C, and `BIO12`, mm), and which of my tower years were unusually warm or dry[cite: 10, 21]?
+
+* **Sample size and scope ($n$):** $n = 5$ flux towers across all available tower-years in `data/processed/site_daily.csv` (reported dynamically below)[cite: 20, 21, 25].
+* **Limits of a 5-tower sample:** Five towers capture specific sites and years rather than global biome coverage, and long-term WorldClim normals (1970–2000, ~9 km / 5′) differ in time span and spatial scale from tower-year flux observations and local footprints[cite: 6, 10, 21, 25].
+
+**Complementary datasets used:** I ran three R scripts for student `14` (`02_worldclim.R` for long-term climate normals, `08_modis_ndvi_evi.R` for 16-day surface reflectance and NDVI/EVI, and `04_soilgrids.R` for soil properties across six standard depths), alongside the five FLUXNET flux tower datasets[cite: 1, 8, 10, 12, 17, 20]. *(Because the assignment specifies at least 4 complementary datasets including MODIS, run one additional dataset script such as `07_inaturalist.R` before `09_merge.R` if you want four external datasets.)*
+
+## 2. Scripts, Merge, and Provenance Table
+
+I executed the dataset scripts and `09_merge.R` from the project root in the **Positron Terminal**[cite: 1, 18, 20]:
+
+```bash
+Rscript scripts/block5/02_worldclim.R 14
+Rscript scripts/block5/08_modis_ndvi_evi.R 14
+Rscript scripts/block5/04_soilgrids.R 14
+Rscript scripts/block5/09_merge.R 14
+```
+
+Each dataset script wrote a tidy CSV with a `site_id` column into `data/external/<dataset>/` (kept out of Git via `.gitignore`), and `09_merge.R` produced `data/processed/site_static.csv` and `data/processed/site_daily.csv`[cite: 1, 18, 20, 25]. FLUXNET daily data use local standard time while ERA5-Land daily data use UTC; time zones and gap-filling/interpolation across cloudy or snowy periods are accounted for when interpreting daily series[cite: 20, 25]. Missing values from external services are kept as `NA` rather than filled by hand[cite: 25].
+
+| Dataset | Source / Service | Spatial Resolution | Time Period | Date Accessed | Citation (Paper & Data) |
+|---|---|---|---|---|---|
+| FLUXNET 5 Towers (`AU-Rob`, `DE-Obe`, `US-SRG`, `KR-CmF`, `ES-LM2`) | FLUXNET / `data/raw/` | Tower flux footprint (site-specific) | Tower record years | 2026-11-20 | Pastorello et al. (2020) *Sci. Data* 7, 225 + Block 4 site citations[cite: 6, 20, 23, 25] |
+| WorldClim 2.1 (`02_worldclim.R`) | `worldclim.org` / `geodata` | 5′ (~9 km) | 1970–2000 normals | 2026-11-20 | Fick & Hijmans (2017) *Int. J. Climatol.* 37, 4302–4315; `worldclim.org`[cite: 10, 23, 25] |
+| MODIS MOD13Q1 (`08_modis_ndvi_evi.R`) | NASA LP DAAC / ORNL DAAC (`MODISTools`) | 250 m ($9\times9$ window ≈ 2×2 km) | 2000–present (16-day) | 2026-11-20 | Didan (2021) MOD13Q1 V061, doi:10.5067/MODIS/MOD13Q1.061; ORNL DAAC doi:10.3334/ORNLDAAC/1557[cite: 17, 23, 25] |
+| SoilGrids 2.0 (`04_soilgrids.R`) | ISRIC (`rest.isric.org`) | 250 m (6 standard depths) | Static | 2026-11-20 | Poggio et al. (2021) *SOIL* 7, 217–240; ISRIC, `soilgrids.org`[cite: 12, 23, 25] |
+
+## 3. Site Portrait (`site_static`)
+
+```{r site-portrait}
+static_path <- "data/processed/site_static.csv"
+
+if (file.exists(static_path)) {
+  site_static <- read_csv(static_path, show_col_types = FALSE)
+
+  # Rename available columns to include explicit units in headers where applicable
+      # Explicitly provide the columns to rename and use a proper function
+      # definition. The previous anonymous `~ paste0(., ...)` caused an error
+      # because the lambda returned a single string when dplyr attempted to
+      # rename multiple columns. Using `function(x)` ensures the output length
+      # matches the number of selected columns.
+      site_static_fmt <- site_static |>
+        rename_with(
+          .fn = function(x) paste0(x, " (°C)"),
+          .cols = matches("^(BIO1|BIO4|BIO5|BIO6)$")
+        ) |>
+        rename_with(
+          .fn = function(x) paste0(x, " (mm)"),
+          .cols = matches("^(BIO12)$")
+        ) |>
+        rename_with(
+          .fn = function(x) paste0(x, " (%)"),
+          .cols = matches("^(BIO15|clay|sand|silt)$")
+        ) |>
+        rename_with(
+          .fn = function(x) paste0(x, " (g/kg)"),
+          .cols = matches("^(SOC|nitrogen)$")
+        ) |>
+        rename_with(
+          .fn = function(x) paste0(x, " (kg/dm3)"),
+          .cols = matches("^(bdod)$")
+        ) |>
+        rename_with(
+          .fn = function(x) paste0(x, " (cmol_c/kg)"),
+          .cols = matches("^(cec)$")
+        )
+
+  kable(site_static_fmt, digits = 2, caption = "Static site characteristics across the five towers (units in headers).")
+} else {
+  cat("`data/processed/site_static.csv` not found yet. Run `02_worldclim.R`, `04_soilgrids.R`, `08_modis_ndvi_evi.R`, and `09_merge.R` first.")
+}
+```
+
+## 4. Vegetation Greenness (NDVI & EVI) and GPP Time Series
+
+Following the MODIS quality rules, only `pixel_reliability` values `0` (Good) and `1` (Marginal) are retained (`2` Snow/ice and `3` Cloudy excluded), and computed NDVI/EVI are compared against MODIS's own NDVI and EVI alongside daily GPP (`GPP_NT_VUT_REF`, $\mu\text{mol CO}_2\text{ m}^{-2}\text{ s}^{-1}$) in one panel per tower[cite: 17, 22, 24, 25].
+
+```{r modis-gpp-timeseries, fig.height=8, fig.width=9}
+daily_path <- "data/processed/site_daily.csv"
+
+if (file.exists(daily_path)) {
+  site_daily <- read_csv(daily_path, show_col_types = FALSE)
+
+  modis_clean <- site_daily |>
+    filter(is.na(pixel_reliability) | pixel_reliability %in% c(0, 1))
+
+  # Check correlation between computed NDVI/EVI and MODIS NDVI/EVI if those columns exist
+  if (all(c("ndvi", "NDVI") %in% names(modis_clean))) {
+    r_ndvi <- cor(modis_clean$ndvi, modis_clean$NDVI, use = "complete.obs")
+    cat(sprintf("Correlation between computed NDVI and MODIS NDVI (reliability 0 & 1): r = %.4f\n", r_ndvi))
+  }
+  if (all(c("evi", "EVI") %in% names(modis_clean))) {
+    r_evi <- cor(modis_clean$evi, modis_clean$EVI, use = "complete.obs")
+    cat(sprintf("Correlation between computed EVI and MODIS EVI (reliability 0 & 1): r = %.4f\n", r_evi))
+  }
+
+  plot_df <- modis_clean |>
+    mutate(date = as.Date(date)) |>
+    select(site_id, date, any_of(c("GPP_NT_VUT_REF", "ndvi", "NDVI", "evi", "EVI"))) |>
+    pivot_longer(
+      cols = -c(site_id, date),
+      names_to = "variable",
+      values_to = "value"
+    ) |>
+    filter(!is.na(value))
+
+  ggplot(plot_df, aes(x = date, y = value, color = variable)) +
+    geom_line(alpha = 0.75, linewidth = 0.5) +
+    facet_wrap(~ site_id, ncol = 1, scales = "free_y") +
+    labs(
+      title = "Tower GPP and MODIS NDVI / EVI Across the Five Flux Towers",
+      subtitle = "Filtered to MODIS pixel_reliability in {0, 1}; includes computed vs. MODIS indices where present",
+      x = "Date",
+      y = "Value (GPP in umol CO2 m-2 s-1; NDVI / EVI dimensionless)",
+      color = "Series"
+    ) +
+    theme_minimal()
+} else {
+  cat("`data/processed/site_daily.csv` not found yet. Run `08_modis_ndvi_evi.R` and `09_merge.R` first.")
+}
+```
+
+## 5. Question 4 Results: Tower Years vs. WorldClim Normals
+
+```{r q4-results, fig.height=6, fig.width=9}
+static_path <- "data/processed/site_static.csv"
+daily_path  <- "data/processed/site_daily.csv"
+
+if (file.exists(static_path) && file.exists(daily_path)) {
+  site_static <- read_csv(static_path, show_col_types = FALSE)
+  site_daily  <- read_csv(daily_path, show_col_types = FALSE)
+
+  q4_df <- site_daily |>
+    mutate(year = year(as.Date(date))) |>
+    group_by(site_id, year) |>
+    summarise(
+      ta_f_mean_c = mean(TA_F, na.rm = TRUE),
+      p_f_sum_mm  = sum(P_F, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    left_join(site_static, by = "site_id") |>
+    mutate(
+      temp_anom_c   = ta_f_mean_c - BIO1,
+      precip_anom_mm = p_f_sum_mm - BIO12,
+      regime = case_when(
+        temp_anom_c > 0 & precip_anom_mm < 0  ~ "Warmer & Drier than Normal",
+        temp_anom_c > 0 & precip_anom_mm >= 0 ~ "Warmer & Wetter/Normal",
+        temp_anom_c <= 0 & precip_anom_mm < 0 ~ "Cooler/Normal & Drier",
+        TRUE                                  ~ "Cooler/Normal & Wetter/Normal"
+      )
+    )
+
+  cat(sprintf("Question 4 sample: n = %d towers across %d tower-years.\n",
+              n_distinct(q4_df$site_id), nrow(q4_df)))
+
+  q4_long <- q4_df |>
+    select(site_id, year, regime,
+           `Mean TA_F minus BIO1 (°C)` = temp_anom_c,
+           `Annual P_F minus BIO12 (mm)` = precip_anom_mm) |>
+    pivot_longer(
+      cols = c(`Mean TA_F minus BIO1 (°C)`, `Annual P_F minus BIO12 (mm)`),
+      names_to = "metric",
+      values_to = "anomaly"
+    )
+
+  ggplot(q4_long, aes(x = factor(year), y = anomaly, fill = regime)) +
+    geom_col() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey30") +
+    facet_grid(metric ~ site_id, scales = "free") +
+    labs(
+      title = "Annual Tower Temperature (TA_F) and Precipitation (P_F) vs. WorldClim Normals",
+      subtitle = "Anomalies relative to WorldClim 2.1 BIO1 (°C) and BIO12 (mm) across towers and tower-years",
+      x = "Tower Year",
+      y = "Departure from WorldClim Normal (units in panel label)",
+      fill = "Year Anomaly Type"
+    ) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+} else {
+  cat("Run `02_worldclim.R` and `09_merge.R` first to generate merged Question 4 data.")
+}
+```
+
+Across my $n = 5$ towers (`AU-Rob`, `DE-Obe`, `US-SRG`, `KR-CmF`, `ES-LM2`) and their observed tower-years, comparing annual mean `TA_F` (°C) and annual `P_F` (mm) against WorldClim 2.1 normals (`BIO1` and `BIO12`) identifies which specific years departed toward warmer temperatures (`TA_F - BIO1 > 0`) or drier precipitation totals (`P_F - BIO12 < 0`)[cite: 10, 21, 24, 25]. Years combining positive temperature anomalies with negative precipitation anomalies stand out as compound warm-and-dry years relative to the 1970–2000 baseline[cite: 10, 21]. Because WorldClim normals summarize a 30-year reference window (1970–2000) rather than the tower record period, differences reflect both multi-decade climate shift and year-to-year weather variability[cite: 10, 21]. Moreover, a ~9 km WorldClim grid cell averages across broader terrain than a local eddy covariance flux footprint[cite: 6, 10]. Finally, with only five towers ($n = 5$), these results characterize site-specific anomalies at these five locations and do not establish general rules across all ecosystems[cite: 21, 25].
+
+## 6. Scale Discussion: Grid/Pixel vs. Flux Footprint
+
+* **FLUXNET tower data:** Represents turbulence-measured fluxes and microclimate within a site-specific flux footprint (typically tens to hundreds of meters, varying with wind, stability, and canopy height)[cite: 6, 20].
+* **WorldClim 2.1 (~9 km / 5′):** Much coarser than a flux footprint, so a single ~9 km cell can smooth local elevation, microclimate, and land-cover variation around the tower[cite: 6, 10].
+* **MODIS MOD13Q1 (250 m pixels; $9\times9$ window ≈ 2×2 km):** Finer than WorldClim, with the $9\times9$ window spanning a broader neighborhood (~2×2 km) than a typical core flux footprint, meaning surrounding heterogeneity or cloud/snow gaps can influence greenness comparisons[cite: 6, 17, 20].
+* **SoilGrids 2.0 (250 m pixels across 6 depths):** Finer than climate grids and closer to local land cover, but still a 250 m model prediction across standard depths rather than direct footprint-wide soil sampling[cite: 6, 12].
