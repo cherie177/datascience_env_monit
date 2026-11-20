@@ -1,0 +1,147 @@
+---
+title: "Block 5 Report"
+author: "Chaeyeon Lee"
+date: "2026-11-20"
+format: html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(knitr)
+
+static_path <- if (file.exists("data/processed/site_static.csv")) {
+  "data/processed/site_static.csv"
+} else {
+  "../data/processed/site_static.csv"
+}
+
+daily_path <- if (file.exists("data/processed/site_daily.csv")) {
+  "data/processed/site_daily.csv"
+} else {
+  "../data/processed/site_daily.csv"
+}
+
+site_static <- read_csv(static_path, show_col_types = FALSE)
+site_daily  <- read_csv(daily_path, show_col_types = FALSE)
+```
+
+## 1. Research Question
+
+For my five towers (`AU-Rob`, `DE-Obe`, `US-SRG`, `KR-CmF`, `ES-LM2`), how do each tower year's mean air temperature (`TA_F`) and annual precipitation (`P_F`) compare with WorldClim 2.1 normals (`BIO1` and `BIO12`), and which tower years were unusually warm or dry?
+
+This covers $n = 5$ towers across the available tower-years in the merged dataset. Because it only includes five towers and compares observed tower years against 1970–2000 WorldClim normals at a ~9 km grid resolution, the results apply to these specific sites and years rather than all ecosystems broadly.
+
+## 2. Datasets Used
+
+I used the daily and static data from my five FLUXNET towers together with three external datasets:
+
+* **WorldClim 2.1** (`02_worldclim.R`): ~9 km (5′) resolution, 1970–2000 climate normals (`BIO1` annual mean temperature in °C, `BIO12` annual precipitation in mm). Source: Fick & Hijmans (2017), *International Journal of Climatology*, via `geodata` / `worldclim.org` (accessed 2026-11-20).
+* **MODIS MOD13Q1** (`08_modis_ndvi_evi.R`): 250 m resolution (16-day composites, $9\times9$ pixel window), accessed via `MODISTools` / ORNL DAAC on 2026-11-20 (Didan, 2021).
+* **SoilGrids 2.0** (`04_soilgrids.R`): 250 m resolution soil properties across standard depths, accessed via ISRIC on 2026-11-20 (Poggio et al., 2021).
+
+## 3. Scripts and Merge
+
+In the terminal, I ran the R scripts for student `14` and merged everything with `09_merge.R`:
+
+```bash
+Rscript scripts/block5/02_worldclim.R 14
+Rscript scripts/block5/08_modis_ndvi_evi.R 14
+Rscript scripts/block5/04_soilgrids.R 14
+Rscript scripts/block5/09_merge.R 14
+```
+
+`09_merge.R` wrote `data/processed/site_static.csv` and `data/processed/site_daily.csv`. When reading the daily series, tower data and external datasets do not always share the same time zone or gap-filling behavior.
+
+## 4. Site Summary and Time Series
+
+```{r site-table}
+site_summary <- site_static
+
+temp_cols   <- intersect(c("BIO1", "BIO4", "BIO5", "BIO6"), names(site_summary))
+precip_cols <- intersect(c("BIO12"), names(site_summary))
+pct_cols    <- intersect(c("BIO15", "clay", "sand", "silt"), names(site_summary))
+gkg_cols    <- intersect(c("SOC", "nitrogen"), names(site_summary))
+
+for (col in temp_cols)   names(site_summary)[names(site_summary) == col] <- paste0(col, " (°C)")
+for (col in precip_cols) names(site_summary)[names(site_summary) == col] <- paste0(col, " (mm)")
+for (col in pct_cols)    names(site_summary)[names(site_summary) == col] <- paste0(col, " (%)")
+for (col in gkg_cols)    names(site_summary)[names(site_summary) == col] <- paste0(col, " (g/kg)")
+
+kable(site_summary, digits = 2)
+```
+
+```{r ndvi-evi-gpp, fig.height=8, fig.width=8}
+vi_filtered <- site_daily
+
+if ("pixel_reliability" %in% names(vi_filtered)) {
+  vi_filtered <- vi_filtered |>
+    filter(is.na(pixel_reliability) | pixel_reliability %in% c(0, 1))
+}
+
+vi_plot <- vi_filtered |>
+  mutate(date = as.Date(date)) |>
+  select(site_id, date, any_of(c("GPP_NT_VUT_REF", "ndvi", "NDVI", "evi", "EVI"))) |>
+  pivot_longer(-c(site_id, date), names_to = "series", values_to = "val") |>
+  filter(!is.na(val))
+
+ggplot(vi_plot, aes(x = date, y = val, color = series)) +
+  geom_line(linewidth = 0.5, alpha = 0.8) +
+  facet_wrap(~ site_id, ncol = 1, scales = "free_y") +
+  labs(
+    title = "GPP and NDVI / EVI by Tower",
+    x = "Date",
+    y = "Value",
+    color = "Series"
+  ) +
+  theme_minimal()
+```
+
+## 5. Question 4 Results and Scale Notes
+
+```{r q4-plot, fig.height=6, fig.width=8}
+annual_q4 <- site_daily |>
+  mutate(year = year(as.Date(date))) |>
+  group_by(site_id, year) |>
+  summarise(
+    ta_mean_c = mean(TA_F, na.rm = TRUE),
+    p_sum_mm  = sum(P_F, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  left_join(site_static, by = "site_id") |>
+  mutate(
+    diff_temp_c    = ta_mean_c - BIO1,
+    diff_precip_mm = p_sum_mm - BIO12
+  )
+
+cat("Towers:", n_distinct(annual_q4$site_id), "| Tower-years:", nrow(annual_q4), "\n")
+
+annual_long <- annual_q4 |>
+  select(site_id, year, diff_temp_c, diff_precip_mm) |>
+  pivot_longer(-c(site_id, year), names_to = "metric", values_to = "diff") |>
+  mutate(
+    metric = recode(
+      metric,
+      "diff_temp_c"    = "TA_F - BIO1 (°C)",
+      "diff_precip_mm" = "P_F - BIO12 (mm)"
+    )
+  )
+
+ggplot(annual_long, aes(x = factor(year), y = diff, fill = diff < 0)) +
+  geom_col(show.legend = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  facet_grid(metric ~ site_id, scales = "free") +
+  labs(
+    title = "Tower-Year Temperature and Precipitation vs. WorldClim Normals",
+    x = "Year",
+    y = "Difference from Normal"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Across the $n = 5$ towers and their tower-years, comparing annual mean `TA_F` and annual `P_F` against WorldClim `BIO1` and `BIO12` shows which years were warmer (`TA_F - BIO1 > 0`) or drier (`P_F - BIO12 < 0`) than the long-term baseline. Years with warmer temperature anomalies alongside lower precipitation stand out as relatively warm and dry years for that site. Part of the difference comes from comparing specific tower years against a 1970–2000 normal rather than an identical period, as well as spatial scale differences: a tower flux footprint covers a local area around the mast, whereas WorldClim (~9 km) averages over a much wider grid cell, and MODIS (250 m / $9\times9$ window) and SoilGrids (250 m) reflect grid-cell estimates rather than exact footprint measurements. With $n = 5$ towers, these patterns describe my five sites and are not a general global pattern.
